@@ -6,3 +6,4 @@ pytesseract
 Pillow
 llama-cpp-python
 mangum
+fitz
