@@ -1,9 +1,9 @@
 fastapi
 uvicorn
 requests
-pdfplumber
-pytesseract
-Pillow
-llama-cpp-python
+PyMuPDF
 mangum
+torch
+transformers
+python-multipart
 fitz
