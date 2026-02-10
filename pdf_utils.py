@@ -1,58 +1,79 @@
 # pdf_utils.py
+
 import requests
 import tempfile
-from pathlib import Path
 import fitz  # PyMuPDF
-from io import BytesIO
+import re
+from typing import List, Dict
 
 
-def download_pdf(url: str) -> str:
+# ----------------------------
+# Utility: clean question words
+# ----------------------------
+def clean_words(text: str):
     """
-    Downloads PDF from a URL to a temporary file and returns the file path
+    Extract meaningful keywords (remove punctuation, numbers, short words)
     """
-    response = requests.get(url)
-    response.raise_for_status()  # fail if download fails
+    return re.findall(r"[a-zA-Z]{4,}", text.lower())
 
-    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
-    temp_file.write(response.content)
-    temp_file.close()
 
-    return temp_file.name
+# ----------------------------
+# Download PDF (STREAMING)
+# ----------------------------
+import time
+import requests
+import tempfile
 
-def extract_text_from_pdf(file_path: str) -> str:
+def download_pdf(url: str, retries=3) -> str:
     """
-    Extracts all text (including tables as flattened text) from PDF
-    Returns a single string
+    Robust PDF downloader with retries
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/pdf",
+    }
+
+    for attempt in range(retries):
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=30,
+                stream=True,
+                verify=True
+            )
+            response.raise_for_status()
+
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+
+            for chunk in response.iter_content(chunk_size=16384):
+                if chunk:
+                    temp_file.write(chunk)
+
+            temp_file.close()
+            return temp_file.name
+
+        except Exception as e:
+            if attempt == retries - 1:
+                raise e
+            time.sleep(2)  # wait before retry
+
+
+# ----------------------------
+# Extract text from PDF
+# ----------------------------
+def extract_text_from_pdf(file_path: str) -> List[Dict]:
+    """
+    Extract text page-by-page from PDF.
+    Returns a list of dicts:
+    [
+        {"page": 1, "text": "..."},
+        ...
+    ]
     """
     doc = fitz.open(file_path)
-    full_text = []
-
-    for page in doc:
-        # get page text (this includes tables in most PDFs)
-        page_text = page.get_text("text")
-        full_text.append(page_text)
-
-    doc.close()
-    return "\n".join(full_text)
-
-
-def get_pdf_pages(pdf_url: str):
-    """
-    Fetch PDF from URL and return list of pages with text.
-    """
-    try:
-        resp = requests.get(pdf_url, timeout=20)
-        resp.raise_for_status()
-    except requests.RequestException as e:
-        raise ValueError(f"Failed to fetch PDF: {e}")
-
-    try:
-        pdf_bytes = BytesIO(resp.content)
-        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    except Exception as e:
-        raise ValueError(f"Failed to read PDF: {e}")
-
     pages = []
+
     for i, page in enumerate(doc):
         pages.append({
             "page": i + 1,
@@ -62,23 +83,32 @@ def get_pdf_pages(pdf_url: str):
     doc.close()
     return pages
 
-def retrieve_relevant_text(pages, question, max_pages=3):
+
+# ----------------------------
+# Retrieve relevant text
+# ----------------------------
+def retrieve_relevant_text(pages, question, max_pages=4):
     """
-    Select relevant pages based on keyword matching.
+    Robust retrieval for competition PDFs.
+    Always returns useful context.
     """
-    keywords = [
-        w.lower() for w in question.split()
-        if len(w) > 3
-    ]
 
-    matched_pages = []
+    q = question.lower()
 
-    for p in pages:
-        text_lower = p["text"].lower()
-        if any(k in text_lower for k in keywords):
-            matched_pages.append(p["text"])
+    # 1️⃣ If question mentions page → return that page index directly
+    page_match = re.search(r"page\s+(\d+)", q)
+    if page_match:
+        page_no = int(page_match.group(1))
+        if 1 <= page_no <= len(pages):
+            return pages[page_no - 1]["text"]
 
-        if len(matched_pages) >= max_pages:
-            break
+    # 2️⃣ If question mentions section → return early pages (NIST structure)
+    if "section" in q:
+        return "\n".join(p["text"] for p in pages[:max_pages])
 
-    return "\n".join(matched_pages)
+    # 3️⃣ Methodology / summary / explain → early pages
+    if any(x in q for x in ["summary", "methodology", "explain", "approach"]):
+        return "\n".join(p["text"] for p in pages[:max_pages])
+
+    # 4️⃣ Default fallback → first pages (ALWAYS NON-EMPTY)
+    return "\n".join(p["text"] for p in pages[:max_pages])

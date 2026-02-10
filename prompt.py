@@ -1,22 +1,30 @@
 # prompt.py
 
-def build_prompt(pdf_text: str, question: str, max_context_chars: int = 3000) -> str:
+def build_prompt(context: str, questions: list) -> str:
     """
-    Build a strict, PDF-only prompt for Qwen.
+    Build a strict, clean prompt that returns one plain-text answer per question.
     """
-    context = pdf_text[:max_context_chars].strip()
 
-    prompt = f"""
-You are a precise assistant. Answer the question strictly using the context below.
-Do NOT add any information that is NOT in the context.
-If the answer is not in the context, respond with "No answer found in the document."
+    questions_block = "\n".join(
+        f"Q{i+1}: {q}" for i, q in enumerate(questions)
+    )
+
+    return f"""
+You are a precise assistant.
+
+Rules:
+- Answer strictly using the context below
+- Do NOT add numbering, bullets, or explanations
+- Each answer must be ONE short sentence
+- One answer per question, in the SAME order
+- If an answer is not present, say exactly:
+  No answer found in the document.
 
 Context:
 {context}
 
-Question:
-{question}
+Questions:
+{questions_block}
 
-Answer concisely in one sentence or phrase.
-"""
-    return prompt.strip()
+Answers:
+""".strip()

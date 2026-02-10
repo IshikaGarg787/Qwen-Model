@@ -21,3 +21,4 @@ def ask_model(prompt: str) -> str:
         return f"Error running model: {e.stderr}"
     except FileNotFoundError:
         return f"Error: Ollama executable not found at {OLLAMA_PATH}"
+
